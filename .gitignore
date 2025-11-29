@@ -1,0 +1,39 @@
+# Python cache & build files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+env/
+venv/
+
+# Arduino build artifacts
+*.elf
+*.hex
+*.bin
+
+# Node/Blynk build files (if any)
+node_modules/
+
+# Edge Impulse exported binaries
+*.eim
+
+# Logs & datasets
+data/raw/*
+data/processed/*
+
+# Ignore everything except folder structure
+!data/raw/
+!data/processed/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VSCode / IDE folders
+.vscode/
+.idea/
+
+# Environment variables
+.env
