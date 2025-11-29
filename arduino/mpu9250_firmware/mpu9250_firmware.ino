@@ -1,56 +1,105 @@
-/**
- * BackTrack - ESP32-S3 Firmware
- * MPU-9250 Posture Detection (MVP Version)
- * -----------------------------------------
- * Features:
- *  - Reads IMU (accel + gyro)
- *  - Calibration for neutral posture
- *  - Threshold-based posture detection
- *  - Vibration motor feedback
- *  - Blynk integration
- */
+#include <Arduino.h>
+#include "config.h"
+#include "imu_driver.h"
+#include "feature_extractor.h"
+#include "tflite_inference.h"
+#include "posture_feedback.h"
 
-#include <Wire.h>
-#include "calibration_utils.h"
-#include "posture_detection.h"
-#include "vibration_feedback.h"
-#include "blynk_integration.h"
+// Globals
+IMUDriver imu;
+PostureFeedback feedback;
+float feature_buffer[FEATURE_VECTOR_SIZE];
+float sample9[9];
+
+unsigned long last_sample_ms = 0;
 
 void setup()
 {
-    Serial.begin(115200);
-    Wire.begin();
+    Serial.begin(SERIAL_BAUD);
+    delay(200);
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-    initIMU();
-    initVibrationMotor();
+    if (!imu.begin())
+    {
+        Serial.println("IMU init failed");
+    }
+    else
+    {
+        Serial.println("IMU init ok");
+    }
 
-    delay(1500);
-    Serial.println("Starting Calibration...");
-    performCalibration(); // User sits straight
+    featureExtractorBegin(SAMPLE_RATE_HZ, WINDOW_SAMPLES);
+    tfliteBegin();
+    feedback.begin();
 
-#ifdef USE_BLYNK
-    connectToBlynk();
-#endif
-
-    Serial.println("Setup complete.");
+    Serial.println("Postura+ firmware ready");
+    // Optionally calibrate automatically briefly
+    imu.calibrate(200, 500); // quick calibration; increase for accuracy
 }
 
 void loop()
 {
-    IMUData imu = readIMU();            // Read accel + gyro
-    float tiltAngle = computeTilt(imu); // IMU fusion (simplified)
-    PostureState state = classifyPosture(tiltAngle);
+    unsigned long now = millis();
+    if (now - last_sample_ms < SAMPLE_PERIOD_MS)
+    {
+        // Non-blocking wait
+        delay(1);
+        return;
+    }
+    last_sample_ms = now;
 
-    handleFeedback(state); // Vibrate if slouching
+    IMUSample s;
+    if (!imu.readSample(s))
+        return;
 
-    Serial.print("Angle:");
-    Serial.print(tiltAngle);
-    Serial.print(", State:");
-    Serial.println(state);
+    // pack sample
+    sample9[0] = s.ax;
+    sample9[1] = s.ay;
+    sample9[2] = s.az;
+    sample9[3] = s.gx;
+    sample9[4] = s.gy;
+    sample9[5] = s.gz;
+    sample9[6] = s.mx;
+    sample9[7] = s.my;
+    sample9[8] = s.mz;
 
-#ifdef USE_BLYNK
-    sendToBlynk(state, tiltAngle);
-#endif
+    // push into extractor
+    featureExtractorPushSample(sample9);
 
-    delay(100);
+    // If we have enough samples (window filled), extract features and classify
+    static int cycles = 0;
+    cycles++;
+    if (cycles >= WINDOW_SAMPLES)
+    {
+        bool ok = featureExtractorGetFeatures(feature_buffer, FEATURE_VECTOR_SIZE);
+        if (ok)
+        {
+            int cls = tfliteClassify(feature_buffer, FEATURE_VECTOR_SIZE);
+            PostureState state = POSTURE_GOOD;
+            if (cls == 0)
+                state = POSTURE_GOOD;
+            else if (cls == 1)
+                state = POSTURE_SLIGHT;
+            else if (cls == 2)
+                state = POSTURE_BAD;
+            feedback.handle(state);
+
+            if (DEBUG_SERIAL)
+            {
+                Serial.print("Class:");
+                Serial.print(cls);
+                Serial.print(", conf=");
+                Serial.println(tfliteGetClassConfidence(cls), 4);
+            }
+        }
+        cycles = 0;
+    }
+
+    // Optional: handle button to re-calibrate
+    if (digitalRead(BUTTON_PIN) == LOW)
+    {
+        Serial.println("Button pressed - re-calibrating...");
+        imu.calibrate(200, 1000);
+        featureExtractorReset();
+    }
 }

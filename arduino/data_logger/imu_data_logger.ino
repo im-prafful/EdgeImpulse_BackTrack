@@ -1,29 +1,39 @@
-#include <Wire.h>
-#include "MPU9250.h"
+#include <Arduino.h>
+#include "imu_driver.h"
 
-MPU9250 mpu;
+IMUDriver imu;
 
 void setup()
 {
     Serial.begin(115200);
-    Wire.begin();
-    mpu.setup(0x68);
-    delay(1000);
+    imu.begin();
+    delay(200);
+    Serial.println("START_CSV");
+    Serial.println("ax,ay,az,gx,gy,gz,mx,my,mz");
 }
 
 void loop()
 {
-    mpu.update();
-    Serial.print(mpu.getAccX());
-    Serial.print(",");
-    Serial.print(mpu.getAccY());
-    Serial.print(",");
-    Serial.print(mpu.getAccZ());
-    Serial.print(",");
-    Serial.print(mpu.getGyroX());
-    Serial.print(",");
-    Serial.print(mpu.getGyroY());
-    Serial.print(",");
-    Serial.println(mpu.getGyroZ());
-    delay(20);
+    IMUSample s;
+    if (imu.readSample(s))
+    {
+        Serial.print(s.ax, 6);
+        Serial.print(',');
+        Serial.print(s.ay, 6);
+        Serial.print(',');
+        Serial.print(s.az, 6);
+        Serial.print(',');
+        Serial.print(s.gx, 6);
+        Serial.print(',');
+        Serial.print(s.gy, 6);
+        Serial.print(',');
+        Serial.print(s.gz, 6);
+        Serial.print(',');
+        Serial.print(s.mx, 6);
+        Serial.print(',');
+        Serial.print(s.my, 6);
+        Serial.print(',');
+        Serial.println(s.mz, 6);
+    }
+    delay(SAMPLE_PERIOD_MS);
 }
